@@ -187,7 +187,7 @@ export const STATS = {
   // All recall/precision/fp values are PERCENTAGES (0-100) for a single
   // consistent unit across the site — call sites render `${value}%` directly.
   benchmark: {
-    pint: { recall: 63.64, precision: 99.65, fp: 0.25, samples: 850 },
+    pint: { recall: 60.31, precision: 100, fp: 0, samples: 850 },
     skill: { recall: 100, precision: 97, fp: 0.2, samples: 498 },
     garak: {
       recall: 97.2,
