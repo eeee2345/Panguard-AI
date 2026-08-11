@@ -31,20 +31,20 @@ export const STATS = {
    * bundle (src/lib/atr-rules-compiled.json) ships the 650 production rules
    * only — draft/deprecated are excluded to mirror the runtime engine.
    */
-  atrVersion: '3.5.11',
+  atrVersion: '3.5.12',
   /**
    * Full ATR corpus (agent-threat-rules v3.5.8 on npm = 747 YAML rules) —
    * auditable by `npm i agent-threat-rules@3.5.8 && find rules -name '*.yaml' | wc -l`.
    * The online scanner runs the 650 production subset (see atr-rules-compiled.json).
    */
-  atrRules: 768,
+  atrRules: 783,
   /** Total detection patterns across the full ATR corpus (747 rules, v3.5.8). */
   atrPatterns: 3_200,
-  totalRules: 768,
+  totalRules: 783,
   /** Use this for all user-facing display — avoids stale hardcoded counts. */
-  totalRulesDisplay: '768' as const,
+  totalRulesDisplay: '783' as const,
   /** Separate display for honest breakdown */
-  atrRulesDisplay: '768' as const,
+  atrRulesDisplay: '783' as const,
   /** Promotion interval in Threat Cloud */
   promotionIntervalMinutes: 2,
   testsPassing: 3_528,
