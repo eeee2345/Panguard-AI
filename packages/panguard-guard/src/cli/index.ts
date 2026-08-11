@@ -25,6 +25,7 @@ import {
 import type { StatusItem } from '@panguard-ai/core';
 import { GuardEngine } from '../guard-engine.js';
 import { loadConfig, saveConfig, DEFAULT_DATA_DIR } from '../config.js';
+import type { GuardConfig } from '../types.js';
 import { redactSecrets } from '../redact.js';
 import { PidFile } from '../daemon/index.js';
 import { installService, uninstallService } from '../daemon/index.js';
@@ -1246,6 +1247,31 @@ async function commandStatus(dataDir: string): Promise<void> {
   }
 }
 
+/**
+ * Apply a single Threat Cloud consent answer to a config.
+ *
+ * The three participation flags move together on purpose. Upload without rule
+ * sync gives a deployment the cost of contributing findings and none of the
+ * benefit of receiving the rules those findings produce, and
+ * `threatCloudRuleSyncEnabled` has no other code path that can turn it on —
+ * `rule-loader.ts` bails out on `!== true`, so leaving it behind here strands
+ * it at its default forever. This mirrors `askTelemetryConsent()` in the
+ * panguard package, which derives the same three flags from one answer.
+ *
+ * Returns a new object; the input config is not mutated.
+ */
+export function applyThreatCloudConsent(config: GuardConfig, agreed: boolean): GuardConfig {
+  return {
+    ...config,
+    telemetryEnabled: agreed,
+    threatCloudUploadEnabled: agreed,
+    threatCloudRuleSyncEnabled: agreed,
+    threatCloudEndpoint: agreed
+      ? (config.threatCloudEndpoint ?? 'https://tc.panguard.ai/api')
+      : config.threatCloudEndpoint,
+  };
+}
+
 /** Install as system service / 安裝為系統服務 */
 async function commandInstall(dataDir: string): Promise<void> {
   const sp = spinner('Installing PanguardGuard as system service...');
@@ -1304,13 +1330,7 @@ async function commandInstall(dataDir: string): Promise<void> {
     lang: uiLang,
   });
 
-  const updated = {
-    ...config,
-    threatCloudUploadEnabled: enableTC,
-    threatCloudEndpoint: enableTC
-      ? (config.threatCloudEndpoint ?? 'https://tc.panguard.ai/api')
-      : config.threatCloudEndpoint,
-  };
+  const updated = applyThreatCloudConsent(config, enableTC);
   try {
     saveConfig(updated, configPath);
   } catch (err: unknown) {
@@ -1330,6 +1350,11 @@ async function commandInstall(dataDir: string): Promise<void> {
     console.log(
       c.dim(
         '    You can enable it later: panguard-guard config --set threatCloudUploadEnabled=true'
+      )
+    );
+    console.log(
+      c.dim(
+        '    Rule sync is a separate flag: panguard-guard config --set threatCloudRuleSyncEnabled=true'
       )
     );
   }
