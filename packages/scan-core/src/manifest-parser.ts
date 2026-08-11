@@ -59,7 +59,6 @@ export function parseManifestFromString(
   const degraded: string[] = [];
   const metadata = normaliseMetadata(metadataRaw, degraded);
 
-
   const str = (key: string): string | undefined => {
     const coerced = coerceString(parsed[key]);
     if (coerced !== undefined && typeof parsed[key] !== 'string') degraded.push(key);
@@ -67,7 +66,8 @@ export function parseManifestFromString(
   };
 
   const tools = coerceStringArray(parsed['allowed-tools']);
-  if (tools !== undefined && !Array.isArray(parsed['allowed-tools'])) degraded.push('allowed-tools');
+  if (tools !== undefined && !Array.isArray(parsed['allowed-tools']))
+    degraded.push('allowed-tools');
 
   return {
     name: str('name') ?? fallbackName,
@@ -97,15 +97,14 @@ export function parseManifestFromString(
  * `metadata.openclaw` and a bare `metadata.requires` are both seen in the wild;
  * the bare form is lifted under `openclaw` so consumers have one path to read.
  */
-function normaliseMetadata(
-  value: unknown,
-  degraded: string[]
-): SkillMetadata | undefined {
+function normaliseMetadata(value: unknown, degraded: string[]): SkillMetadata | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const raw = value as Record<string, unknown>;
   const openclawRaw = (raw['openclaw'] ?? raw['clawdbot']) as Record<string, unknown> | undefined;
   const nest =
-    typeof openclawRaw === 'object' && openclawRaw !== null ? openclawRaw : ({} as Record<string, unknown>);
+    typeof openclawRaw === 'object' && openclawRaw !== null
+      ? openclawRaw
+      : ({} as Record<string, unknown>);
   const requiresRaw = (nest['requires'] ?? raw['requires']) as Record<string, unknown> | undefined;
 
   const listField = (source: Record<string, unknown>, key: string, label: string) => {

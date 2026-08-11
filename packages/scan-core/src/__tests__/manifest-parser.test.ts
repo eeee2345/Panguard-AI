@@ -298,7 +298,11 @@ describe('parseManifestFromString — malformed field types', () => {
   it('coerces a comma-separated allowed-tools string into an array', () => {
     // verbatim: benign/acestep
     const manifest = parseManifestFromString(
-      frontmatter('name: acestep', 'description: Generate music', 'allowed-tools: Read, Write, Bash, Skill')
+      frontmatter(
+        'name: acestep',
+        'description: Generate music',
+        'allowed-tools: Read, Write, Bash, Skill'
+      )
     );
     expect(Array.isArray(manifest['allowed-tools'])).toBe(true);
     expect(manifest['allowed-tools']).toEqual(['Read', 'Write', 'Bash', 'Skill']);
@@ -307,7 +311,11 @@ describe('parseManifestFromString — malformed field types', () => {
   it('keeps a single-tool allowed-tools string as a one-element array', () => {
     // verbatim: benign/agent-browser-2
     const manifest = parseManifestFromString(
-      frontmatter('name: agent-browser', 'description: Automates browsers', 'allowed-tools: Bash(agent-browser:*)')
+      frontmatter(
+        'name: agent-browser',
+        'description: Automates browsers',
+        'allowed-tools: Bash(agent-browser:*)'
+      )
     );
     expect(manifest['allowed-tools']).toEqual(['Bash(agent-browser:*)']);
   });
@@ -315,7 +323,10 @@ describe('parseManifestFromString — malformed field types', () => {
   it('flattens a description that YAML parsed as a sequence', () => {
     // verbatim: benign/my-new-skill — a bracketed TODO placeholder is flow-sequence syntax
     const manifest = parseManifestFromString(
-      frontmatter('name: my-new-skill', 'description: [TODO: Complete explanation of what the skill does]')
+      frontmatter(
+        'name: my-new-skill',
+        'description: [TODO: Complete explanation of what the skill does]'
+      )
     );
     expect(typeof manifest.description).toBe('string');
     expect(manifest.description).toContain('TODO');
@@ -338,12 +349,20 @@ describe('parseManifestFromString — malformed field types', () => {
     const manifest = parseManifestFromString(
       frontmatter('name: acestep', 'description: [TODO: fill me in]', 'allowed-tools: Read, Write')
     );
-    expect(manifest.parseDegraded).toEqual(expect.arrayContaining(['description', 'allowed-tools']));
+    expect(manifest.parseDegraded).toEqual(
+      expect.arrayContaining(['description', 'allowed-tools'])
+    );
   });
 
   it('leaves a well-formed manifest undegraded', () => {
     const manifest = parseManifestFromString(
-      frontmatter('name: fine', 'description: A normal description', 'allowed-tools:', '  - Read', '  - Write')
+      frontmatter(
+        'name: fine',
+        'description: A normal description',
+        'allowed-tools:',
+        '  - Read',
+        '  - Write'
+      )
     );
     expect(manifest['allowed-tools']).toEqual(['Read', 'Write']);
     expect(manifest.parseDegraded).toBeUndefined();
@@ -377,7 +396,12 @@ describe('parseManifestFromString — metadata.requires coercion', () => {
   it('coerces a single-value requires.env string into an array', () => {
     // verbatim: benign/baidu-ai-map
     const m = parseManifestFromString(
-      withMetadata('metadata:', '  requires:', '    bins: ["curl"]', '    env: BAIDU_MAP_AUTH_TOKEN')
+      withMetadata(
+        'metadata:',
+        '  requires:',
+        '    bins: ["curl"]',
+        '    env: BAIDU_MAP_AUTH_TOKEN'
+      )
     );
     expect(m.metadata?.openclaw?.requires?.env).toEqual(['BAIDU_MAP_AUTH_TOKEN']);
     expect(m.metadata?.openclaw?.requires?.bins).toEqual(['curl']);
@@ -386,7 +410,11 @@ describe('parseManifestFromString — metadata.requires coercion', () => {
   it('splits a comma-separated requires.env string', () => {
     // verbatim: benign/signalhire-skill
     const m = parseManifestFromString(
-      withMetadata('metadata:', '  requires:', '    env: SIGNALHIRE_API_KEY,SIGNALHIRE_CALLBACK_URL')
+      withMetadata(
+        'metadata:',
+        '  requires:',
+        '    env: SIGNALHIRE_API_KEY,SIGNALHIRE_CALLBACK_URL'
+      )
     );
     expect(m.metadata?.openclaw?.requires?.env).toEqual([
       'SIGNALHIRE_API_KEY',
@@ -420,14 +448,34 @@ describe('parseManifestFromString — metadata coercion is reported too', () => 
     // verbatim: benign/baidu-ai-map — the manifest only scans because we repaired it,
     // and a report that says "clean" without saying "repaired" overstates the evidence.
     const m = parseManifestFromString(
-      ['---', 'name: s', 'description: d', 'metadata:', '  requires:', '    env: BAIDU_MAP_AUTH_TOKEN', '---', 'Body.'].join('\n')
+      [
+        '---',
+        'name: s',
+        'description: d',
+        'metadata:',
+        '  requires:',
+        '    env: BAIDU_MAP_AUTH_TOKEN',
+        '---',
+        'Body.',
+      ].join('\n')
     );
     expect(m.parseDegraded).toEqual(expect.arrayContaining(['metadata.requires.env']));
   });
 
   it('leaves well-formed metadata undegraded', () => {
     const m = parseManifestFromString(
-      ['---', 'name: s', 'description: d', 'metadata:', '  requires:', '    env:', '      - A', '      - B', '---', 'Body.'].join('\n')
+      [
+        '---',
+        'name: s',
+        'description: d',
+        'metadata:',
+        '  requires:',
+        '    env:',
+        '      - A',
+        '      - B',
+        '---',
+        'Body.',
+      ].join('\n')
     );
     expect(m.parseDegraded).toBeUndefined();
   });
