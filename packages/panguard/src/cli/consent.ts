@@ -61,7 +61,9 @@ export function markConsentAsked(): void {
  */
 export function printCollectiveDefenseDisclosure(): void {
   console.log('');
-  console.log(`  ${symbols.info} ${c.bold('Join Collective Defense (optional, off by default)')}`);
+  console.log(
+    `  ${symbols.info} ${c.bold('Join Collective Defense (your choice, reversible anytime)')}`
+  );
   console.log('');
   console.log(
     `  ${c.dim('Why join: every rule-matched attack you see can become a community rule,')}`

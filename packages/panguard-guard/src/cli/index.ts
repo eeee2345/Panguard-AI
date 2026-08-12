@@ -1322,8 +1322,8 @@ async function commandInstall(dataDir: string): Promise<void> {
 
   const enableTC = await promptConfirm({
     message: {
-      en: 'Enable Threat Cloud collective defense? (optional, off by default)',
-      'zh-TW': '啟用 Threat Cloud 集體防禦？（選用，預設關閉）',
+      en: 'Join Collective Defense? Share anonymized attack signatures, receive community rules.',
+      'zh-TW': '加入集體防禦？分享匿名化的攻擊特徵，並自動接收社群規則。',
     },
     // Opt-in: default OFF so a bare Enter declines and nothing is shared.
     defaultValue: false,
