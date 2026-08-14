@@ -826,7 +826,7 @@ export function setupCommand(): Command {
           // Threat Cloud backend can read it — verified live 2026-07-07.
           if (!options.yes && !options.json) {
             console.log();
-            console.log(`  ${c.bold('Join Collective Defense (optional, off by default)')}`);
+            console.log(`  ${c.bold('Join Collective Defense (your choice, reversible anytime)')}`);
             console.log(c.dim('    If you agree, PanGuard connects to Threat Cloud and will:'));
             console.log(
               c.dim('    · share minimal ANONYMIZED threat signatures (matched rule ID, attack')
