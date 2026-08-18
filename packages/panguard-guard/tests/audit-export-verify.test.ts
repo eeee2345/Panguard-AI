@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +20,7 @@ import {
   getAuditKey,
   buildActor,
   newDecisionId,
+  canonicalize,
   __resetAuditKeyCacheForTests,
   type ChainedRecord,
 } from '../src/audit/index.js';
@@ -98,10 +100,14 @@ function makeReportRecord(ruleId: string, msg: string): ReportRecord {
 }
 
 interface EvidenceDoc {
+  version?: string;
   integrity?: string;
   verdicts?: Array<Record<string, unknown>>;
   summary?: { durable_events?: number };
   attestation?: {
+    method?: string;
+    note?: string;
+    sha256?: string;
     chain?: {
       algorithm?: string;
       verified?: boolean;
@@ -231,6 +237,54 @@ describe('Export honesty — reads the durable log and proves it', () => {
     expect(res.status).toBe(200);
     const doc = (await res.json()) as EvidenceDoc;
     expect(doc.summary?.durable_events).toBe(0);
+  });
+
+  it('self-hash (v1.2) recomputes over the FULL deep-canonical content', async () => {
+    const chain = new AuditChain(logPath, { key });
+    chain.append(makeReportRecord('ATR-2026-00001', 'a'));
+    chain.append(makeReportRecord('ATR-2026-00002', 'b'));
+
+    const res = await authed('/api/export/evidence');
+    const doc = (await res.json()) as EvidenceDoc;
+    expect(doc.version).toBe('1.2');
+
+    const stored = doc.attestation?.sha256;
+    expect(typeof stored).toBe('string');
+    expect(stored).toMatch(/^[0-9a-f]{64}$/);
+    // Follow the documented recompute procedure exactly: set attestation.sha256
+    // to the empty string, deep-canonicalize, SHA-256.
+    const clone = JSON.parse(JSON.stringify(doc)) as EvidenceDoc;
+    clone.attestation!.sha256 = '';
+    const recomputed = createHash('sha256').update(canonicalize(clone)).digest('hex');
+    expect(recomputed).toBe(stored);
+  });
+
+  it('self-hash covers NESTED verdict content (the class a top-level skeleton hash misses)', async () => {
+    const chain = new AuditChain(logPath, { key });
+    chain.append(makeReportRecord('ATR-2026-00001', 'a'));
+
+    const res = await authed('/api/export/evidence');
+    const doc = (await res.json()) as EvidenceDoc;
+    const stored = doc.attestation?.sha256;
+
+    // An auditor holding a copy where one nested verdict conclusion was flipped
+    // must see the recompute break.
+    const tampered = JSON.parse(JSON.stringify(doc)) as EvidenceDoc;
+    tampered.verdicts![0]!['conclusion'] = 'benign';
+    tampered.attestation!.sha256 = '';
+    const recomputed = createHash('sha256').update(canonicalize(tampered)).digest('hex');
+    expect(recomputed).not.toBe(stored);
+  });
+
+  it('attestation.note documents the exact recompute procedure', async () => {
+    const chain = new AuditChain(logPath, { key });
+    chain.append(makeReportRecord('ATR-2026-00001', 'a'));
+
+    const res = await authed('/api/export/evidence');
+    const doc = (await res.json()) as EvidenceDoc;
+    expect(doc.attestation?.method).toBe('sha256');
+    expect(doc.attestation?.note).toContain('deep-sorted');
+    expect(doc.attestation?.note).toContain('empty string');
   });
 });
 

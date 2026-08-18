@@ -51,6 +51,7 @@ import {
   AuditChain,
   getAuditKey,
   anonymizeActorForExport,
+  canonicalize,
   type ChainedRecord,
   type VerifyResult,
 } from '../audit/index.js';
@@ -1707,7 +1708,8 @@ export class DashboardServer {
    *   reason, headSeq, headHash} — the hash-chain verdict over the durable log.
    * - Sets top-level integrity:'TAMPERED' when verification fails, and STILL
    *   emits (an auditor must always receive a verdict, even a failing one).
-   * - Also keeps the document self-SHA-256 over the canonical content.
+   * - Also keeps a document self-SHA-256 over the DEEP canonical content
+   *   (v1.2; keys sorted at every depth so nested content is covered).
    *
    * Suitable for SOC 2 / EU AI Act Article 15 audit submission alongside the
    * deeper enterprise PDF (panguard-enterprise/migrator/src/evidence/pdf.ts).
@@ -1753,7 +1755,11 @@ export class DashboardServer {
 
     const content = {
       kind: 'panguard.evidence-pack',
-      version: '1.1',
+      // 1.2: attestation.sha256 became a DEEP canonical hash. The 1.1 hash used
+      // a JSON.stringify replacer ARRAY, which filters keys at every depth, so
+      // it covered only the top-level skeleton — nested verdict/summary content
+      // could be edited without breaking the recompute.
+      version: '1.2',
       workspace_id: workspaceId,
       generated_at: generatedAt,
       panguard_version: PANGUARD_VERSION,
@@ -1797,7 +1803,7 @@ export class DashboardServer {
       ),
       attestation: {
         method: 'sha256',
-        note: 'SHA-256 below is over the canonical JSON of this document with this field set to null. Verify by recomputing the hash with attestation.sha256 = null and comparing.',
+        note: 'SHA-256 below is over the canonical JSON of this document (JSON-normalized, object keys deep-sorted at every depth) with attestation.sha256 set to the empty string. Recompute with any canonicalizer that sorts object keys recursively and compare.',
         sha256: '',
         // Hash-chain attestation over the durable on-disk events log.
         chain: {
@@ -1812,8 +1818,12 @@ export class DashboardServer {
       },
     };
 
-    // Canonical hash: compute over the document with attestation.sha256 emptied.
-    const canonical = JSON.stringify(content, Object.keys(content).sort());
+    // Canonical hash: deep-canonical JSON (keys sorted at EVERY depth) over the
+    // document with attestation.sha256 emptied. Never use a JSON.stringify
+    // replacer ARRAY here — an array acts as a key filter at all depths, so the
+    // hash would cover only the top-level skeleton and nested tampering would
+    // survive a recompute.
+    const canonical = canonicalize(content);
     const hash = createHash('sha256').update(canonical).digest('hex');
     content.attestation.sha256 = hash;
 
