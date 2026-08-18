@@ -23,6 +23,10 @@
     "./utils": {
       "import": "./dist/utils/index.js",
       "types": "./dist/utils/index.d.ts"
+    },
+    "./signing": {
+      "import": "./dist/signing/index.js",
+      "types": "./dist/signing/index.d.ts"
     }
   },
   "publishConfig": {

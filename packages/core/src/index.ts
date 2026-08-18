@@ -236,6 +236,23 @@ export type {
   WizardAnswers,
 } from './cli/index.js';
 
+export {
+  canonicalJson,
+  deriveKeyId,
+  signReport,
+  verifyReport,
+  PGA_SIG_FORMAT,
+  PGA_SIG_ALG,
+  KEY_ID_PREFIX,
+} from './signing/index.js';
+export type {
+  PgaSignatureEnvelope,
+  SignReportOptions,
+  VerifyFailureReason,
+  VerifyReportResult,
+  VerifyReportOptions,
+} from './signing/index.js';
+
 import { createRequire } from 'node:module';
 const _require = createRequire(import.meta.url);
 const _pkg = _require('../package.json') as { version: string };
