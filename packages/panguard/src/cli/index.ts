@@ -91,6 +91,7 @@ import { auditCommand } from './commands/audit.js';
 import { skillsCommand } from './commands/skills.js';
 import { hacktivityCommand } from './commands/hacktivity.js';
 import { setupCommand } from './commands/setup.js';
+import { reportCommand as reportSignCommand } from './commands/report-sign.js';
 import { startInteractive } from './interactive.js';
 import { upCommand } from './commands/up.js';
 
@@ -127,9 +128,13 @@ program.addCommand(chatCommand(), hidden);
 program.addCommand(configCommand(), hidden);
 program.addCommand(hookCommand(), hidden);
 program.addCommand(trapCommand(), hidden);
-// report (enterprise-tier AI Compliance Audit Evidence generator) is NOT in the
-// free community CLI. (Re-enable behind a license gate: restore import + addCommand.)
-// program.addCommand(reportCommand());
+// The enterprise-tier AI Compliance Audit Evidence GENERATOR is NOT in the
+// free community CLI. (Re-enable behind a license gate when it returns.)
+// Report SIGNING/VERIFICATION however is a public trust primitive — the
+// /trust/signing-key page tells every auditor to run
+// `pga report sign verify <report.json> --expect-key <key_id>`, so that
+// command must exist in the free CLI (verification needs no license).
+program.addCommand(reportSignCommand(), hidden);
 program.addCommand(threatCommand(), hidden);
 program.addCommand(demoCommand(), hidden);
 program.addCommand(initCommand(), hidden);
