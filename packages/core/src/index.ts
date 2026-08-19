@@ -236,21 +236,25 @@ export type {
   WizardAnswers,
 } from './cli/index.js';
 
+// Signing — offline audit-report verification / 簽章驗證
 export {
-  canonicalJson,
-  deriveKeyId,
-  signReport,
-  verifyReport,
-  PGA_SIG_FORMAT,
-  PGA_SIG_ALG,
+  canonicalizeAudit,
+  SIG_PAYLOAD_FORMAT,
   KEY_ID_PREFIX,
+  deriveKeyId,
+  buildSigningPayload,
+  verifyIssuerSignature,
+  computeAuditHashV2,
+  verifyAuditReport,
 } from './signing/index.js';
 export type {
-  PgaSignatureEnvelope,
-  SignReportOptions,
-  VerifyFailureReason,
-  VerifyReportResult,
-  VerifyReportOptions,
+  IssuerSignature,
+  AuditIntegrity,
+  AuditVerifyReason,
+  AuditVerifyStatus,
+  IssuerSigVerifyResult,
+  AuditReportVerifyResult,
+  VerifyAuditReportOptions,
 } from './signing/index.js';
 
 import { createRequire } from 'node:module';

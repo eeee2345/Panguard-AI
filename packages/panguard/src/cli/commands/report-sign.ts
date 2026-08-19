@@ -1,49 +1,40 @@
 /**
- * `pga report sign` / `pga report sign verify` - PGA-SIG-V1 report signing.
- * `pga report sign` / `pga report sign verify` - PGA-SIG-V1 報告簽章與驗證。
+ * `pga report sign verify` - offline verification of issuer-signed audit reports.
+ * `pga report sign verify` - 發行方簽章稽核報告的離線驗證。
  *
- * Implements the public trust promise on /trust/signing-key: audit reports
- * issued by PanGuard AI are signed with the issuer Ed25519 key, and anyone can
- * verify a report OFFLINE with the published public key:
+ * The free half of the trust promise on /trust/signing-key: audit reports
+ * issued by PanGuard AI carry a PGA-SIG-V1 issuer signature, and anyone -
+ * auditor, partner, regulator - can verify one offline:
  *
  *   pga report sign verify <report.json> --expect-key <key_id>
  *
- * Signing is issuer-side only: the private key comes from the
- * PANGUARD_SIGNING_KEY environment variable or --key-file, and is never
- * shipped, logged, or echoed. Verification needs no secrets - the published
- * public key is bundled below as the default trust store (delivered through
- * the signed npm package), and --key can override it for key rotation.
+ * Verification recomputes the canonical hash FROM THE REPORT BODY (never
+ * trusting the stated integrity.sha256), then checks the embedded Ed25519
+ * block: embedded key must hash to the embedded key_id, signature must match
+ * the context-bound payload. WHICH key to trust comes from outside the
+ * document: the bundled published key_id list below (delivered through the
+ * signed npm package), or an explicit --expect-key pin.
  *
- * NOTE: this module is deliberately independent of the enterprise report
- * GENERATOR (which stays out of the free CLI). Verification is a trust
- * primitive and must be free for every auditor, regulator, and customer.
+ * SIGNING is not here: issuer key lifecycle (keygen/show), hash
+ * counter-signing (Mode B) and one-step issuing (Mode A) live in the private
+ * enterprise tooling. Verification needs no license; signing needs the issuer.
  *
  * @module @panguard-ai/panguard/cli/commands/report-sign
  */
 
 import { Command } from 'commander';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 
-import { signReport, verifyReport } from '@panguard-ai/core';
-
-/** Environment variable holding the issuer private key PEM (issuer-side only). */
-export const SIGNING_KEY_ENV = 'PANGUARD_SIGNING_KEY';
+import { verifyAuditReport, type AuditReportVerifyResult } from '@panguard-ai/core';
 
 /**
- * Bundled trust store: the issuer public keys published at
- * website /.well-known/panguard-signing-key.json. Keep the two in sync - the
+ * Published issuer key_ids - the active keys listed at
+ * website /.well-known/panguard-signing-key.json. Keep the two in sync: the
  * .well-known file is the authoritative publication, this copy makes offline
- * verification work out of the box.
+ * verification work out of the box. Per the published policy, a report signed
+ * by a key_id not listed (and not explicitly pinned) must not be trusted.
  */
-export const TRUSTED_ISSUER_KEYS: ReadonlyArray<{ keyId: string; publicKeyPem: string }> = [
-  {
-    keyId: 'pgk1-621b5f58dbfa5e2c',
-    publicKeyPem:
-      '-----BEGIN PUBLIC KEY-----\n' +
-      'MCowBQYDK2VwAyEAE8yWwjJ9K3FUibtTZq640dHJVEGw26AM8NiM749fzqU=\n' +
-      '-----END PUBLIC KEY-----\n',
-  },
-];
+export const TRUSTED_ISSUER_KEY_IDS: readonly string[] = ['pgk1-621b5f58dbfa5e2c'];
 
 /** Injectable output sink so tests can capture CLI output without spawning. */
 export interface ReportSignIo {
@@ -56,70 +47,13 @@ const defaultIo: ReportSignIo = {
   err: (line: string) => console.error(line),
 };
 
-export interface RunReportSignOptions {
-  /** Path to the issuer private key PEM. Default: env PANGUARD_SIGNING_KEY. */
-  keyFile?: string;
-  /** Output path. Default: <file>.signed.json next to the input. */
-  out?: string;
-}
-
 export interface RunReportSignVerifyOptions {
-  /** Require the report to be signed by exactly this key_id. */
+  /** Require the report to be issuer-signed by exactly this key_id. */
   expectKey?: string;
-  /** Trusted public key PEM file - overrides the bundled trust store. */
-  key?: string;
   /** Emit machine-readable JSON instead of human output. */
   json?: boolean;
-}
-
-/** Exit codes: 0 = ok, 1 = verification failed, 2 = usage/environment error. */
-export async function runReportSign(
-  file: string,
-  opts: RunReportSignOptions,
-  io: ReportSignIo = defaultIo
-): Promise<number> {
-  const doc = readJsonObject(file, io);
-  if (doc === null) return 2;
-
-  let privateKeyPem: string;
-  if (opts.keyFile !== undefined) {
-    try {
-      privateKeyPem = readFileSync(opts.keyFile, 'utf8');
-    } catch (err) {
-      io.err(`Cannot read key file ${opts.keyFile}: ${messageOf(err)}`);
-      return 2;
-    }
-  } else {
-    const fromEnv = process.env[SIGNING_KEY_ENV];
-    if (fromEnv === undefined || fromEnv.trim() === '') {
-      io.err(
-        `No signing key: set ${SIGNING_KEY_ENV} to the issuer private key PEM or pass --key-file <path>.`
-      );
-      return 2;
-    }
-    privateKeyPem = fromEnv;
-  }
-
-  let signed: Record<string, unknown>;
-  try {
-    signed = signReport(doc, privateKeyPem);
-  } catch {
-    // Never include crypto library detail here - it can quote the bad key input.
-    io.err('Signing failed: the provided key is not a valid Ed25519 private key PEM.');
-    return 2;
-  }
-
-  const outPath = opts.out ?? defaultSignedPath(file);
-  try {
-    writeFileSync(outPath, JSON.stringify(signed, null, 2) + '\n', 'utf8');
-  } catch (err) {
-    io.err(`Cannot write ${outPath}: ${messageOf(err)}`);
-    return 2;
-  }
-
-  const envelope = signed['signature'] as { key_id: string };
-  io.out(`Signed with ${envelope.key_id} -> ${outPath}`);
-  return 0;
+  /** Trusted key_id list override (tests / air-gapped pinning). */
+  trustedKeyIds?: readonly string[];
 }
 
 /** Exit codes: 0 = verified, 1 = not verified, 2 = usage/environment error. */
@@ -128,152 +62,89 @@ export async function runReportSignVerify(
   opts: RunReportSignVerifyOptions,
   io: ReportSignIo = defaultIo
 ): Promise<number> {
-  const doc = readJsonObject(file, io);
-  if (doc === null) return 2;
-
-  const claimedKeyId = readClaimedKeyId(doc);
-
-  let publicKeyPem: string;
-  if (opts.key !== undefined) {
-    try {
-      publicKeyPem = readFileSync(opts.key, 'utf8');
-    } catch (err) {
-      io.err(`Cannot read key file ${opts.key}: ${messageOf(err)}`);
-      return 2;
-    }
-  } else {
-    const trusted =
-      claimedKeyId === undefined
-        ? TRUSTED_ISSUER_KEYS[0]
-        : TRUSTED_ISSUER_KEYS.find((k) => k.keyId === claimedKeyId);
-    if (trusted === undefined) {
-      const known = TRUSTED_ISSUER_KEYS.map((k) => k.keyId).join(', ');
-      return emitFailure(
-        io,
-        opts,
-        file,
-        claimedKeyId,
-        'unknown-key',
-        `Report claims key_id ${claimedKeyId ?? '(none)'} which is not in the bundled trust store (${known}). ` +
-          'Cross-check /.well-known/panguard-signing-key.json or pass --key <public-key.pem>.'
-      );
-    }
-    publicKeyPem = trusted.publicKeyPem;
-  }
-
-  const result = verifyReport(doc, {
-    publicKeyPem,
-    ...(opts.expectKey !== undefined ? { expectKeyId: opts.expectKey } : {}),
-  });
-
-  if (!result.ok) {
-    return emitFailure(
-      io,
-      opts,
-      file,
-      result.keyId ?? claimedKeyId,
-      result.reason ?? 'bad-signature',
-      `NOT VERIFIED (${result.reason ?? 'bad-signature'}): ${file}`
-    );
-  }
-
-  if (opts.json === true) {
-    io.out(
-      JSON.stringify({
-        ok: true,
-        file,
-        keyId: result.keyId,
-        payloadSha256: result.payloadSha256,
-        signedAt: result.signedAt,
-      })
-    );
-  } else {
-    io.out(`VERIFIED: ${file}`);
-    io.out(`  key_id      ${result.keyId ?? ''}`);
-    io.out(`  signed_at   ${result.signedAt ?? ''}`);
-    io.out(`  payload_sha ${result.payloadSha256 ?? ''}`);
-  }
-  return 0;
-}
-
-/** Commander tree: report > sign (default action) > verify. */
-export function reportCommand(): Command {
-  const verify = new Command('verify')
-    .description('Verify a signed report offline against the published issuer key')
-    .argument('<file>', 'signed report JSON')
-    .option('--expect-key <keyId>', 'require this exact issuer key_id')
-    .option('--key <path>', 'trusted public key PEM (overrides the bundled trust store)')
-    .option('--json', 'machine-readable output')
-    .action(async (file: string, opts: RunReportSignVerifyOptions) => {
-      process.exitCode = await runReportSignVerify(file, opts);
-    });
-
-  const sign = new Command('sign')
-    .description(`Sign a report JSON with the issuer private key (${SIGNING_KEY_ENV})`)
-    .argument('<file>', 'report JSON to sign')
-    .option('--key-file <path>', `issuer private key PEM (default: env ${SIGNING_KEY_ENV})`)
-    .option('--out <path>', 'output path (default: <file>.signed.json)')
-    .action(async (file: string, opts: RunReportSignOptions) => {
-      process.exitCode = await runReportSign(file, opts);
-    });
-  sign.addCommand(verify);
-
-  const report = new Command('report').description(
-    'Audit report signing and verification (PGA-SIG-V1)'
-  );
-  report.addCommand(sign);
-  return report;
-}
-
-// ---------------------------------------------------------------------------
-
-function readJsonObject(file: string, io: ReportSignIo): Record<string, unknown> | null {
   let raw: string;
   try {
     raw = readFileSync(file, 'utf8');
   } catch (err) {
     io.err(`Cannot read ${file}: ${messageOf(err)}`);
-    return null;
+    return 2;
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
     io.err(`${file} is not valid JSON: ${messageOf(err)}`);
-    return null;
+    return 2;
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     io.err(`${file} must contain a JSON object at the top level.`);
-    return null;
+    return 2;
   }
-  return parsed as Record<string, unknown>;
-}
 
-function readClaimedKeyId(doc: Record<string, unknown>): string | undefined {
-  const sig = doc['signature'];
-  if (sig === null || typeof sig !== 'object' || Array.isArray(sig)) return undefined;
-  const keyId = (sig as Record<string, unknown>)['key_id'];
-  return typeof keyId === 'string' ? keyId : undefined;
-}
+  const result = verifyAuditReport(parsed as Record<string, unknown>, {
+    trustedKeyIds: opts.trustedKeyIds ?? TRUSTED_ISSUER_KEY_IDS,
+    ...(opts.expectKey !== undefined ? { expectKeyId: opts.expectKey } : {}),
+  });
 
-function emitFailure(
-  io: ReportSignIo,
-  opts: RunReportSignVerifyOptions,
-  file: string,
-  keyId: string | undefined,
-  reason: string,
-  humanMessage: string
-): number {
   if (opts.json === true) {
-    io.out(JSON.stringify({ ok: false, file, keyId, reason }));
-  } else {
-    io.err(humanMessage);
+    io.out(JSON.stringify({ file, ...result }));
+    return result.ok ? 0 : 1;
   }
-  return 1;
+  return emitHuman(io, file, result);
 }
 
-function defaultSignedPath(file: string): string {
-  return file.endsWith('.json') ? `${file.slice(0, -5)}.signed.json` : `${file}.signed.json`;
+function emitHuman(io: ReportSignIo, file: string, result: AuditReportVerifyResult): number {
+  if (!result.ok) {
+    io.err(`NOT VERIFIED (${result.reason ?? 'unknown'}): ${file}`);
+    if (result.detail !== undefined) io.err(`  ${result.detail}`);
+    return 1;
+  }
+  if (result.status === 'verified-issuer') {
+    io.out(`VERIFIED: ${file}`);
+    io.out(`  integrity   body matches SHA-256 ${result.sha256 ?? ''}`);
+    io.out(
+      `  signature   Ed25519 valid (issuer=${result.issuer ?? ''}, key_id=${result.keyId ?? ''}, jurisdiction=${result.jurisdiction ?? ''})`
+    );
+    io.out(
+      result.trustedKey === true
+        ? '  trust       key_id is on the published trust list (/trust/signing-key)'
+        : '  trust       key_id pinned via --expect-key (not on the published list)'
+    );
+    return 0;
+  }
+  // Hash-only outcomes: the document matches its stated hash, but there is no
+  // offline-verifiable issuer signature - say so plainly.
+  io.out(`HASH VERIFIED (no issuer signature): ${file}`);
+  io.out(`  integrity   body matches SHA-256 ${result.sha256 ?? ''}`);
+  io.out(
+    result.status === 'hash-only-server'
+      ? '  signature   server-signed: offline verification of the server key is not yet available'
+      : `  signature   unsigned (${result.detail ?? 'unknown reason'})`
+  );
+  return 0;
+}
+
+/** Commander tree: report > sign > verify (verification only - signing is enterprise-side). */
+export function reportCommand(): Command {
+  const verify = new Command('verify')
+    .description('Offline-verify an issuer-signed audit report against the published key')
+    .argument('<file>', 'audit report JSON')
+    .option('--expect-key <keyId>', 'require this exact issuer key_id (pgk1-...)')
+    .option('--json', 'machine-readable output')
+    .action(async (file: string, opts: RunReportSignVerifyOptions) => {
+      process.exitCode = await runReportSignVerify(file, opts);
+    });
+
+  const sign = new Command('sign').description(
+    'Audit report signature tools (PGA-SIG-V1) - verification is free; issuing lives in the enterprise tooling'
+  );
+  sign.addCommand(verify);
+
+  const report = new Command('report').description(
+    'Audit report verification (PGA-SIG-V1 issuer signatures)'
+  );
+  report.addCommand(sign);
+  return report;
 }
 
 function messageOf(err: unknown): string {

@@ -1,199 +1,327 @@
 /**
- * PGA-SIG-V1 — detached Ed25519 issuer signature over an audit report.
- * PGA-SIG-V1 — 稽核報告的 Ed25519 發行方簽章格式。
+ * PGA-SIG-V1 — offline verification of issuer-signed audit reports.
+ * PGA-SIG-V1 — 發行方簽章稽核報告的離線驗證。
  *
- * This implements the payload format advertised on the public trust page
- * (website /trust/signing-key and /.well-known/panguard-signing-key.json):
- * a `signature` envelope embedded in the report JSON, signing the canonical
- * form of the report WITHOUT that envelope. Anyone holding the published
- * public key can verify offline; the envelope never carries key material —
- * trust comes from the verifier's key store, not from the document.
+ * WIRE-FORMAT AUTHORITY: the private issuer tooling (@panguard/migrator
+ * signing/) defines this format and is the only thing that SIGNS. This public
+ * module implements the free VERIFICATION half the trust page promises
+ * (/trust/signing-key): any auditor, partner, or regulator can check a report
+ * offline without a license. Key lifecycle (keygen/show), hash counter-signing
+ * and one-step issuing live in the enterprise tooling only.
  *
- * Boundary honesty: this makes an issued report tamper-EVIDENT after signing.
- * It does not attest that the inputs were correct when recorded (garbage in,
- * signed garbage out) and it is not tamper-PROOF.
+ * The signed payload is a deterministic, context-bound string — never the bare
+ * hash — so a signature for one (kind, framework, jurisdiction) cannot be
+ * replayed onto another artifact type or legal framing:
+ *
+ *   PGA-SIG-V1\n<kind>\n<framework>\n<jurisdiction>\n<sha256>\n<key_id>\n<signed_at>
+ *
+ * Trust model: the signature block embeds the public key; verification checks
+ * the embedded key hashes to the embedded key_id (the pinnable anchor), then
+ * verifies Ed25519 over the reconstructed payload. WHICH key_ids to trust is
+ * the caller's decision — the published list on /trust/signing-key, or an
+ * explicit --expect-key pin.
+ *
+ * Boundary honesty: verification proves the report was not modified after
+ * signing and was signed by the holder of the key_id's private key. It does
+ * not attest the inputs were correct when recorded, and it is not
+ * tamper-proof. Wording: tamper-evident, never tamper-proof.
  */
-import {
-  createHash,
-  createPrivateKey,
-  createPublicKey,
-  sign as edSign,
-  verify as edVerify,
-} from 'node:crypto';
+import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
 
-import { canonicalJson } from './canonical.js';
+import { canonicalizeAudit } from './canonical.js';
 
-export const PGA_SIG_FORMAT = 'PGA-SIG-V1';
-export const PGA_SIG_ALG = 'Ed25519';
+export const SIG_PAYLOAD_FORMAT = 'PGA-SIG-V1';
 /** key_id = 'pgk1-' + first 16 hex of SHA-256 over the SPKI DER of the public key. */
 export const KEY_ID_PREFIX = 'pgk1-';
 
-/** The signature envelope embedded in a signed report under `signature`. */
-export interface PgaSignatureEnvelope {
-  format: typeof PGA_SIG_FORMAT;
-  alg: typeof PGA_SIG_ALG;
+/** Embedded, self-contained signature block (JSON-safe) — issuer wire format. */
+export interface IssuerSignature {
+  scheme: 'issuer';
+  payload_format: typeof SIG_PAYLOAD_FORMAT;
+  alg: 'Ed25519';
   key_id: string;
+  issuer: string;
+  /** SPKI PEM — enables offline verification; pin via key_id. */
+  public_key_pem: string;
+  signature_b64: string;
   signed_at: string;
-  /** SHA-256 hex over the canonical payload (report without `signature`). */
-  payload_sha256: string;
-  /** Ed25519 signature (base64) over the same canonical payload bytes. */
-  signature: string;
+  kind: string;
+  framework: string;
+  jurisdiction: string;
 }
 
-export interface SignReportOptions {
-  /** Override the signed_at timestamp (ISO 8601) — for deterministic tests. */
-  signedAt?: string;
+/** The integrity block of an audit-pack report. */
+export interface AuditIntegrity {
+  sha256: string;
+  signature_scheme: 'server' | 'issuer' | 'none';
+  key_id?: string;
+  issuer_signature?: IssuerSignature;
+  unsigned_reason?: string;
 }
 
-export type VerifyFailureReason =
-  | 'missing-signature'
-  | 'unsupported-format'
-  | 'key-id-mismatch'
-  | 'payload-hash-mismatch'
-  | 'bad-signature'
-  | 'invalid-public-key';
-
-export interface VerifyReportResult {
-  ok: boolean;
-  keyId?: string;
-  payloadSha256?: string;
-  signedAt?: string;
-  reason?: VerifyFailureReason;
-}
-
-export interface VerifyReportOptions {
-  /** Trusted public key (SPKI PEM). Trust anchors live OUTSIDE the document. */
-  publicKeyPem: string;
-  /** When set, the envelope's key_id must equal this exactly. */
-  expectKeyId?: string;
-}
-
-/**
- * Derive the public key identifier as published on the trust page.
- * Throws on invalid input — issuer-side tooling must fail loud, not sign blind.
- */
+/** Derive the public key identifier as published on the trust page. Throws on invalid input. */
 export function deriveKeyId(publicKeyPem: string): string {
   const der = createPublicKey(publicKeyPem).export({ type: 'spki', format: 'der' });
   return KEY_ID_PREFIX + createHash('sha256').update(der).digest('hex').slice(0, 16);
 }
 
-/**
- * Sign a report object, returning a NEW object with the `signature` envelope
- * attached. The input is never mutated. An existing `signature` field is
- * replaced (re-signing is idempotent over the payload).
- */
-export function signReport(
-  report: Record<string, unknown>,
-  privateKeyPem: string,
-  opts?: SignReportOptions
-): Record<string, unknown> {
-  if (report === null || typeof report !== 'object' || Array.isArray(report)) {
-    throw new TypeError('signReport: report must be a plain JSON object');
-  }
-  const privateKey = createPrivateKey(privateKeyPem);
-  const publicPem = createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }).toString();
-  const keyId = deriveKeyId(publicPem);
+/** Rebuild the exact context-bound string the issuer signed. */
+export function buildSigningPayload(
+  sha256: string,
+  binding: { kind: string; framework: string; jurisdiction: string },
+  keyId: string,
+  signedAt: string
+): string {
+  return [
+    SIG_PAYLOAD_FORMAT,
+    binding.kind,
+    binding.framework,
+    binding.jurisdiction,
+    sha256,
+    keyId,
+    signedAt,
+  ].join('\n');
+}
 
-  const payload = stripSignature(report);
-  const canonical = canonicalJson(payload);
-  const envelope: PgaSignatureEnvelope = {
-    format: PGA_SIG_FORMAT,
-    alg: PGA_SIG_ALG,
-    key_id: keyId,
-    signed_at: opts?.signedAt ?? new Date().toISOString(),
-    payload_sha256: sha256Hex(canonical),
-    signature: edSign(null, Buffer.from(canonical, 'utf8'), privateKey).toString('base64'),
-  };
-  return { ...payload, signature: envelope };
+export type AuditVerifyReason =
+  | 'not-an-audit-report'
+  | 'legacy-hash-schema'
+  | 'hash-mismatch'
+  | 'missing-issuer-signature'
+  | 'unsupported-payload-format'
+  | 'embedded-key-unreadable'
+  | 'embedded-key-id-mismatch'
+  | 'bad-signature'
+  | 'expect-key-mismatch'
+  | 'expected-key-but-not-issuer-signed'
+  | 'untrusted-key-id';
+
+export interface IssuerSigVerifyResult {
+  valid: boolean;
+  reason?: AuditVerifyReason;
+  detail?: string;
 }
 
 /**
- * Verify a signed report against a trusted public key. Total function: never
- * throws — every failure mode maps to a typed reason so callers (CLI, CI) can
- * report precisely what broke.
+ * Offline verification of an issuer signature against an independently
+ * recomputed sha256. Checks, in order: payload format, key_id <-> public-key
+ * binding, then Ed25519 over the reconstructed payload. Total function.
  */
-export function verifyReport(
-  report: Record<string, unknown>,
-  opts: VerifyReportOptions
-): VerifyReportResult {
-  if (report === null || typeof report !== 'object' || Array.isArray(report)) {
-    return { ok: false, reason: 'missing-signature' };
+export function verifyIssuerSignature(sha256: string, sig: IssuerSignature): IssuerSigVerifyResult {
+  if (sig.payload_format !== SIG_PAYLOAD_FORMAT) {
+    return {
+      valid: false,
+      reason: 'unsupported-payload-format',
+      detail: String(sig.payload_format),
+    };
   }
-  const envelope = readEnvelope(report);
-  if (envelope === null) {
-    const raw = report['signature'];
+  let derivedKeyId: string;
+  try {
+    derivedKeyId = deriveKeyId(sig.public_key_pem);
+  } catch (err) {
+    return {
+      valid: false,
+      reason: 'embedded-key-unreadable',
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+  if (derivedKeyId !== sig.key_id) {
+    return {
+      valid: false,
+      reason: 'embedded-key-id-mismatch',
+      detail: `embedded public key hashes to ${derivedKeyId}, block claims ${sig.key_id}`,
+    };
+  }
+  const payload = buildSigningPayload(
+    sha256,
+    { kind: sig.kind, framework: sig.framework, jurisdiction: sig.jurisdiction },
+    sig.key_id,
+    sig.signed_at
+  );
+  let ok: boolean;
+  try {
+    ok = edVerify(
+      null,
+      Buffer.from(payload, 'utf-8'),
+      createPublicKey(sig.public_key_pem),
+      Buffer.from(sig.signature_b64, 'base64')
+    );
+  } catch {
+    ok = false;
+  }
+  return ok ? { valid: true } : { valid: false, reason: 'bad-signature' };
+}
+
+/**
+ * Recompute the canonical body hash of a v2 audit report (everything except
+ * `integrity`). Returns null for pre-v2 reports: the legacy subset hash covered
+ * only part of the body, and a fail-closed public tool refuses to bless it —
+ * the hashSchema marker lives INSIDE the hashed body, so stripping it from a
+ * v2 report breaks the hash rather than downgrading the check.
+ */
+export function computeAuditHashV2(report: Record<string, unknown>): string | null {
+  const metadata = report['metadata'];
+  const hashSchema =
+    metadata !== null && typeof metadata === 'object'
+      ? (metadata as Record<string, unknown>)['hashSchema']
+      : undefined;
+  if (hashSchema !== 'v2') return null;
+  const { integrity: _integrity, ...body } = report;
+  return createHash('sha256').update(canonicalizeAudit(body)).digest('hex');
+}
+
+export type AuditVerifyStatus = 'verified-issuer' | 'hash-only-server' | 'hash-only-unsigned';
+
+export interface AuditReportVerifyResult {
+  ok: boolean;
+  status?: AuditVerifyStatus;
+  reason?: AuditVerifyReason;
+  detail?: string;
+  /** Recomputed canonical body hash. */
+  sha256?: string;
+  keyId?: string;
+  issuer?: string;
+  jurisdiction?: string;
+  /** True when the signing key_id is in the caller's trusted list. */
+  trustedKey?: boolean;
+}
+
+export interface VerifyAuditReportOptions {
+  /** Require the report to be issuer-signed by exactly this key_id. */
+  expectKeyId?: string;
+  /**
+   * key_ids trusted without an explicit pin — normally the published list from
+   * /.well-known/panguard-signing-key.json. An issuer-signed report whose
+   * key_id is neither pinned nor in this list fails with 'untrusted-key-id'
+   * (the trust page policy: an unlisted key_id must not be trusted).
+   */
+  trustedKeyIds: readonly string[];
+}
+
+/**
+ * Full offline verification of an audit-pack report JSON: structure, canonical
+ * body hash, then the signature per scheme. Total function — never throws.
+ */
+export function verifyAuditReport(
+  report: Record<string, unknown>,
+  opts: VerifyAuditReportOptions
+): AuditReportVerifyResult {
+  const integrity = readIntegrity(report);
+  if (integrity === null) {
+    const kind = report['kind'];
     return {
       ok: false,
-      reason: raw === undefined || raw === null ? 'missing-signature' : 'unsupported-format',
+      reason: 'not-an-audit-report',
+      detail:
+        kind === 'panguard.evidence-pack'
+          ? 'this is a guard evidence pack (self-attested); it is not an issuer-signed audit report'
+          : 'missing metadata/attestation/integrity blocks',
     };
   }
 
-  let derivedId: string;
-  try {
-    derivedId = deriveKeyId(opts.publicKeyPem);
-  } catch {
-    return { ok: false, keyId: envelope.key_id, reason: 'invalid-public-key' };
+  const recomputed = computeAuditHashV2(report);
+  if (recomputed === null) {
+    return {
+      ok: false,
+      reason: 'legacy-hash-schema',
+      detail:
+        'report predates hashSchema v2 (subset hash) — request a re-issued v2 report for full offline verification',
+    };
   }
-  if (opts.expectKeyId !== undefined && opts.expectKeyId !== envelope.key_id) {
-    return { ok: false, keyId: envelope.key_id, reason: 'key-id-mismatch' };
-  }
-  if (envelope.key_id !== derivedId) {
-    return { ok: false, keyId: envelope.key_id, reason: 'key-id-mismatch' };
+  if (recomputed !== integrity.sha256) {
+    return {
+      ok: false,
+      reason: 'hash-mismatch',
+      sha256: recomputed,
+      detail: `body hashes to ${recomputed}, report states ${integrity.sha256}`,
+    };
   }
 
-  const canonical = canonicalJson(stripSignature(report));
-  const payloadSha256 = sha256Hex(canonical);
-  if (payloadSha256 !== envelope.payload_sha256) {
-    return { ok: false, keyId: envelope.key_id, payloadSha256, reason: 'payload-hash-mismatch' };
+  if (integrity.signature_scheme === 'issuer') {
+    const sig = integrity.issuer_signature;
+    if (sig === undefined) {
+      return { ok: false, reason: 'missing-issuer-signature', sha256: recomputed };
+    }
+    const outcome = verifyIssuerSignature(recomputed, sig);
+    if (!outcome.valid) {
+      return {
+        ok: false,
+        reason: outcome.reason ?? 'bad-signature',
+        sha256: recomputed,
+        keyId: sig.key_id,
+        ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+      };
+    }
+    if (opts.expectKeyId !== undefined && opts.expectKeyId !== sig.key_id) {
+      return {
+        ok: false,
+        reason: 'expect-key-mismatch',
+        sha256: recomputed,
+        keyId: sig.key_id,
+        detail: `report signed by ${sig.key_id}, expected ${opts.expectKeyId}`,
+      };
+    }
+    const trustedKey = opts.trustedKeyIds.includes(sig.key_id);
+    if (opts.expectKeyId === undefined && !trustedKey) {
+      return {
+        ok: false,
+        reason: 'untrusted-key-id',
+        sha256: recomputed,
+        keyId: sig.key_id,
+        issuer: sig.issuer,
+        detail: `key_id ${sig.key_id} is not in the published trust list — pin it explicitly with --expect-key only if you verified it out of band`,
+      };
+    }
+    return {
+      ok: true,
+      status: 'verified-issuer',
+      sha256: recomputed,
+      keyId: sig.key_id,
+      issuer: sig.issuer,
+      jurisdiction: sig.jurisdiction,
+      trustedKey,
+    };
   }
 
-  let valid = false;
-  try {
-    valid = edVerify(
-      null,
-      Buffer.from(canonical, 'utf8'),
-      createPublicKey(opts.publicKeyPem),
-      Buffer.from(envelope.signature, 'base64')
-    );
-  } catch {
-    valid = false;
+  if (opts.expectKeyId !== undefined) {
+    return {
+      ok: false,
+      reason: 'expected-key-but-not-issuer-signed',
+      sha256: recomputed,
+      detail: `--expect-key requires an issuer signature, but signature_scheme is '${integrity.signature_scheme}'`,
+    };
   }
-  if (!valid) {
-    return { ok: false, keyId: envelope.key_id, payloadSha256, reason: 'bad-signature' };
-  }
-  return { ok: true, keyId: envelope.key_id, payloadSha256, signedAt: envelope.signed_at };
-}
-
-/** Report content without the signature envelope — the signed payload. */
-function stripSignature(report: Record<string, unknown>): Record<string, unknown> {
-  const { signature: _omitted, ...payload } = report;
-  return payload;
-}
-
-/** Parse the `signature` field into a well-formed envelope, or null. */
-function readEnvelope(report: Record<string, unknown>): PgaSignatureEnvelope | null {
-  const raw = report['signature'];
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const env = raw as Record<string, unknown>;
-  if (env['format'] !== PGA_SIG_FORMAT || env['alg'] !== PGA_SIG_ALG) return null;
-  if (
-    typeof env['key_id'] !== 'string' ||
-    typeof env['signed_at'] !== 'string' ||
-    typeof env['payload_sha256'] !== 'string' ||
-    typeof env['signature'] !== 'string'
-  ) {
-    return null;
+  if (integrity.signature_scheme === 'server') {
+    return { ok: true, status: 'hash-only-server', sha256: recomputed };
   }
   return {
-    format: PGA_SIG_FORMAT,
-    alg: PGA_SIG_ALG,
-    key_id: env['key_id'],
-    signed_at: env['signed_at'],
-    payload_sha256: env['payload_sha256'],
-    signature: env['signature'],
+    ok: true,
+    status: 'hash-only-unsigned',
+    sha256: recomputed,
+    ...(integrity.unsigned_reason !== undefined ? { detail: integrity.unsigned_reason } : {}),
   };
 }
 
-function sha256Hex(input: string): string {
-  return createHash('sha256').update(input, 'utf8').digest('hex');
+/** Structural read of the integrity block; null when this is not an audit report. */
+function readIntegrity(report: Record<string, unknown>): AuditIntegrity | null {
+  if (report === null || typeof report !== 'object' || Array.isArray(report)) return null;
+  const metadata = report['metadata'];
+  const attestation = report['attestation'];
+  const integrity = report['integrity'];
+  if (
+    metadata === null ||
+    typeof metadata !== 'object' ||
+    attestation === null ||
+    typeof attestation !== 'object' ||
+    integrity === null ||
+    typeof integrity !== 'object' ||
+    Array.isArray(integrity)
+  ) {
+    return null;
+  }
+  const block = integrity as Record<string, unknown>;
+  if (typeof block['sha256'] !== 'string' || typeof block['signature_scheme'] !== 'string') {
+    return null;
+  }
+  return integrity as unknown as AuditIntegrity;
 }

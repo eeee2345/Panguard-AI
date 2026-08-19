@@ -1,20 +1,27 @@
 /**
- * Issuer signing stack — PGA-SIG-V1 report signatures.
- * 發行方簽章棧 — PGA-SIG-V1 報告簽章。
+ * Signing — offline verification of issuer-signed audit reports (PGA-SIG-V1).
+ * 簽章 — 發行方簽章稽核報告的離線驗證(PGA-SIG-V1)。
+ *
+ * Verification only: the issuer key lifecycle and signing live in the private
+ * enterprise tooling. This module is what lets ANYONE check a report against
+ * the published key, offline, for free.
  */
-export { canonicalJson } from './canonical.js';
+export { canonicalizeAudit } from './canonical.js';
 export {
-  PGA_SIG_FORMAT,
-  PGA_SIG_ALG,
+  SIG_PAYLOAD_FORMAT,
   KEY_ID_PREFIX,
   deriveKeyId,
-  signReport,
-  verifyReport,
+  buildSigningPayload,
+  verifyIssuerSignature,
+  computeAuditHashV2,
+  verifyAuditReport,
 } from './pga-sig-v1.js';
 export type {
-  PgaSignatureEnvelope,
-  SignReportOptions,
-  VerifyFailureReason,
-  VerifyReportResult,
-  VerifyReportOptions,
+  IssuerSignature,
+  AuditIntegrity,
+  AuditVerifyReason,
+  AuditVerifyStatus,
+  IssuerSigVerifyResult,
+  AuditReportVerifyResult,
+  VerifyAuditReportOptions,
 } from './pga-sig-v1.js';
