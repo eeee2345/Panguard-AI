@@ -5,7 +5,7 @@ This file is a structured long-form context dump intended for AI coding tools
 llms-full.txt to understand a project at depth. It is auto-generated from
 the canonical source files in the panguard-ai repository.
 
-Last generated: 2026-07-19T14:55:47.587Z
+Last generated: 2026-08-19T06:21:27.096Z
 Sources of truth:
 - src/lib/stats.ts (product stats)
 - src/lib/atr-rules-compiled.ts (ATR rule index)
@@ -54,7 +54,7 @@ cost, insufficient differentiation, vendor death spiral).
 
 ---
 
-## Section 2 — Core stats (verified 2026-07-19)
+## Section 2 — Core stats (verified 2026-08-19)
 
 ### Rule corpus
 - 650+ ATR rules (651 exact) in v3.4.0
