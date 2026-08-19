@@ -29,9 +29,7 @@
       "id": "P1",
       "name": "Access control",
       "status": "gap",
-      "findingIds": [
-        "F-1"
-      ]
+      "findingIds": ["F-1"]
     },
     {
       "id": "P2",
