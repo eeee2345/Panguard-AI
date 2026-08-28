@@ -843,6 +843,7 @@ export function upCommand(): Command {
                   detached: true,
                   stdio: ['ignore', outFd, outFd],
                   env: { ...process.env, PANGUARD_QUIET_GUARD: '1' },
+                  windowsHide: true,
                 });
                 child.unref();
                 // Wait briefly for the detached daemon to come up so the summary

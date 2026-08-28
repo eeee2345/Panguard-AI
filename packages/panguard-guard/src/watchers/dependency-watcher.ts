@@ -203,7 +203,7 @@ export function runNpmAudit(cwd: string): Promise<NpmAuditResult | null> {
     execFile(
       'npm',
       ['audit', '--json'],
-      { cwd, timeout: 30_000, maxBuffer: 5 * 1024 * 1024 },
+      { cwd, timeout: 30_000, maxBuffer: 5 * 1024 * 1024, windowsHide: true },
       (error, stdout) => {
         // npm audit exits non-zero when vulnerabilities found; that is expected
         if (!stdout) {

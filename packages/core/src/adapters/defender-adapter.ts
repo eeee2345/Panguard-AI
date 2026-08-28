@@ -34,7 +34,7 @@ const MPCMDRUN_PATH = 'C:\\Program Files\\Windows Defender\\MpCmdRun.exe';
  */
 function execFileAsync(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: 60000 }, (error, stdout, stderr) => {
+    execFile(cmd, args, { timeout: 60000, windowsHide: true }, (error, stdout, stderr) => {
       if (error) {
         reject(error);
         return;

@@ -419,7 +419,10 @@ export async function pullRuleUpdate(deps: CloudSyncDeps): Promise<string | null
       const tgz = join(work, 'bundle.tgz');
       writeFileSync(tgz, buf, { mode: 0o600 });
       // Extract ONLY package/rules from the verified archive.
-      execFileSync('tar', ['-xzf', tgz, '-C', work, 'package/rules'], { timeout: 30_000 });
+      execFileSync('tar', ['-xzf', tgz, '-C', work, 'package/rules'], {
+        timeout: 30_000,
+        windowsHide: true,
+      });
       const extracted = join(work, 'package', 'rules');
       if (!existsSync(extracted)) return null;
       mkdirSync(join(deps.config.dataDir, 'auto-rules'), { recursive: true, mode: 0o700 });

@@ -27,7 +27,7 @@ const logger = createLogger('panguard-guard:os-actions');
 /** Promise wrapper for execFile */
 export function execFilePromise(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout: 10000 }, (error, stdout) => {
+    execFile(command, args, { timeout: 10000, windowsHide: true }, (error, stdout) => {
       if (error) {
         reject(error);
       } else {
