@@ -245,7 +245,7 @@ export class ProcessKiller {
 
 function execFilePromise(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout: 5000 }, (error, stdout) => {
+    execFile(command, args, { timeout: 5000, windowsHide: true }, (error, stdout) => {
       if (error) reject(error);
       else resolve(stdout);
     });

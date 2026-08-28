@@ -153,6 +153,7 @@ function injectClaudeCode(_configPath: string): void {
       {
         timeout: 15_000,
         stdio: 'pipe',
+        windowsHide: true,
       }
     );
     logger.info('Added Panguard MCP via `claude mcp add --scope user`');
@@ -280,6 +281,7 @@ export function injectMCPConfig(platformId: PlatformId): InjectionResult {
         const output = execFileSync('claude', ['mcp', 'list'], {
           timeout: 10_000,
           stdio: 'pipe',
+          windowsHide: true,
         }).toString();
         if (output.includes('panguard')) {
           result.success = true;

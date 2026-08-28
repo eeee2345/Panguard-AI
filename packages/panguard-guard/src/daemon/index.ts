@@ -388,7 +388,7 @@ async function uninstallWindowsService(): Promise<string> {
 
 function execFileAsync(command: string, args: string[]): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    execFile(command, args, { timeout: 15000 }, (error) => {
+    execFile(command, args, { timeout: 15000, windowsHide: true }, (error) => {
       if (error) reject(error);
       else resolve();
     });

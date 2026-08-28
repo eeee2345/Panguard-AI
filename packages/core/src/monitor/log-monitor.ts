@@ -219,7 +219,9 @@ export class LogMonitor extends EventEmitter {
    * 啟動 Windows 事件日誌監控
    */
   private startWindows(): void {
-    this.childProcess = spawn('wevtutil', ['qe', 'Security', '/f:text', '/rd:true', '/c:1']);
+    this.childProcess = spawn('wevtutil', ['qe', 'Security', '/f:text', '/rd:true', '/c:1'], {
+      windowsHide: true,
+    });
 
     this.attachProcessHandlers('windows-wevtutil');
     this.parseOutputStream((line: string) => {

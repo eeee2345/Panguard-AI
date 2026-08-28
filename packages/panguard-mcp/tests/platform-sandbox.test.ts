@@ -27,9 +27,12 @@ vi.mock('node:os', async (importOriginal) => {
   };
 });
 
-// Mock child_process to prevent actual command lookups
+// Mock child_process to prevent actual command lookups.
+// execFile's callback is always the last argument, with or without an options
+// object in between — read it positionally so the stub matches either shape.
 vi.mock('node:child_process', () => ({
-  execFile: (_cmd: string, _args: string[], cb: (err: Error | null) => void) => {
+  execFile: (...args: unknown[]) => {
+    const cb = args[args.length - 1] as (err: Error | null) => void;
     cb(new Error('not found'));
   },
   execFileSync: () => {

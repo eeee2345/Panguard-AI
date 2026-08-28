@@ -312,7 +312,7 @@ export class ProcessWatcher extends EventEmitter {
         return true;
       }
       if (os === 'win32') {
-        await execFileAsync('tasklist', ['/FO', 'CSV', '/V'], { timeout: 5000 });
+        await execFileAsync('tasklist', ['/FO', 'CSV', '/V'], { timeout: 5000, windowsHide: true });
         return true;
       }
       return false;
@@ -543,6 +543,7 @@ export class ProcessWatcher extends EventEmitter {
       const { stdout } = await execFileAsync('tasklist', ['/FO', 'CSV', '/V'], {
         timeout: 5000,
         maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true,
       });
 
       const lines = stdout.trim().split('\n');

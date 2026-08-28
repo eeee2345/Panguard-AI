@@ -360,6 +360,7 @@ async function quickNpmAudit(
       encoding: 'utf-8',
       timeout: 10000,
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     });
     const meta = JSON.parse(raw) as Record<string, unknown>;
 

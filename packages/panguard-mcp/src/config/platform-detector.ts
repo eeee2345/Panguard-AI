@@ -45,7 +45,7 @@ function commandExists(cmd: string): Promise<boolean> {
   if (!/^[a-zA-Z0-9_.-]+$/.test(cmd)) return Promise.resolve(false);
   return new Promise((resolve) => {
     const bin = platform() === 'win32' ? 'where' : 'which';
-    execFile(bin, [cmd], (err) => resolve(!err));
+    execFile(bin, [cmd], { windowsHide: true }, (err) => resolve(!err));
   });
 }
 
@@ -72,6 +72,7 @@ function hasClaudeCodePanguard(): boolean {
     const output = execFileSync('claude', ['mcp', 'list'], {
       timeout: 10_000,
       stdio: 'pipe',
+      windowsHide: true,
     }).toString();
     return output.includes('panguard');
   } catch {

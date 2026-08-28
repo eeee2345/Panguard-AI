@@ -148,6 +148,7 @@ export async function executeGuardStart(args: Record<string, unknown>) {
       detached: true,
       stdio: ['ignore', logFd, logFd],
       env: { ...process.env },
+      windowsHide: true,
     });
     child.unref();
     closeSync(logFd);

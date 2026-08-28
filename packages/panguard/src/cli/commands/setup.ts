@@ -772,6 +772,7 @@ export function setupCommand(): Command {
                   const child = spawn(process.execPath, [guardBin, 'start', '--dashboard'], {
                     detached: true,
                     stdio: 'ignore',
+                    windowsHide: true,
                   });
                   child.unref();
 
