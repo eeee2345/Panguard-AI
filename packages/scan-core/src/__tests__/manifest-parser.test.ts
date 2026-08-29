@@ -279,3 +279,204 @@ describe('parseSkillName', () => {
     expect(parseSkillName('')).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Malformed frontmatter must not produce lying types
+//
+// Every input below is verbatim from a real published skill. YAML happily
+// parses them into types the manifest interface says are impossible, and the
+// unchecked casts in the parser used to pass those straight through — so the
+// crash surfaced far away, inside whichever check called .trim() / .join() /
+// .some() on them. A scanner that throws on a malformed manifest reports zero
+// findings for that skill, which is a silent bypass, not a cosmetic bug.
+// ---------------------------------------------------------------------------
+
+describe('parseManifestFromString — malformed field types', () => {
+  const frontmatter = (...lines: string[]) =>
+    ['---', ...lines, '---', 'Body text that is long enough to look like instructions.'].join('\n');
+
+  it('coerces a comma-separated allowed-tools string into an array', () => {
+    // verbatim: benign/acestep
+    const manifest = parseManifestFromString(
+      frontmatter(
+        'name: acestep',
+        'description: Generate music',
+        'allowed-tools: Read, Write, Bash, Skill'
+      )
+    );
+    expect(Array.isArray(manifest['allowed-tools'])).toBe(true);
+    expect(manifest['allowed-tools']).toEqual(['Read', 'Write', 'Bash', 'Skill']);
+  });
+
+  it('keeps a single-tool allowed-tools string as a one-element array', () => {
+    // verbatim: benign/agent-browser-2
+    const manifest = parseManifestFromString(
+      frontmatter(
+        'name: agent-browser',
+        'description: Automates browsers',
+        'allowed-tools: Bash(agent-browser:*)'
+      )
+    );
+    expect(manifest['allowed-tools']).toEqual(['Bash(agent-browser:*)']);
+  });
+
+  it('flattens a description that YAML parsed as a sequence', () => {
+    // verbatim: benign/my-new-skill — a bracketed TODO placeholder is flow-sequence syntax
+    const manifest = parseManifestFromString(
+      frontmatter(
+        'name: my-new-skill',
+        'description: [TODO: Complete explanation of what the skill does]'
+      )
+    );
+    expect(typeof manifest.description).toBe('string');
+    expect(manifest.description).toContain('TODO');
+  });
+
+  it('coerces a numeric name and description to strings', () => {
+    const manifest = parseManifestFromString(frontmatter('name: 12345', 'description: 42'));
+    expect(manifest.name).toBe('12345');
+    expect(manifest.description).toBe('42');
+  });
+
+  it('drops a mapping-valued description rather than emitting a non-string', () => {
+    const manifest = parseManifestFromString(
+      frontmatter('name: weird', 'description:', '  nested: value')
+    );
+    expect(typeof manifest.description).toBe('string');
+  });
+
+  it('records which fields had to be coerced instead of coercing silently', () => {
+    const manifest = parseManifestFromString(
+      frontmatter('name: acestep', 'description: [TODO: fill me in]', 'allowed-tools: Read, Write')
+    );
+    expect(manifest.parseDegraded).toEqual(
+      expect.arrayContaining(['description', 'allowed-tools'])
+    );
+  });
+
+  it('leaves a well-formed manifest undegraded', () => {
+    const manifest = parseManifestFromString(
+      frontmatter(
+        'name: fine',
+        'description: A normal description',
+        'allowed-tools:',
+        '  - Read',
+        '  - Write'
+      )
+    );
+    expect(manifest['allowed-tools']).toEqual(['Read', 'Write']);
+    expect(manifest.parseDegraded).toBeUndefined();
+  });
+
+  it('survives every downstream string/array operation the checks perform', () => {
+    const manifest = parseManifestFromString(
+      frontmatter('name: 1', 'description: [TODO]', 'allowed-tools: Read, Write')
+    );
+    // These are the exact call shapes that crashed in 1.5.4 and 1.8.26.
+    expect(() => manifest.description.trim()).not.toThrow();
+    expect(() => manifest.name.trim()).not.toThrow();
+    expect(() => (manifest['allowed-tools'] ?? []).some((t) => t === 'Read')).not.toThrow();
+    expect(() => (manifest['allowed-tools'] ?? []).join(', ')).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// metadata.requires.* has the same problem one level deeper, and it is worse:
+// `requires.env` is declared readonly string[], so a guard like
+// `requires.env.length > 0` passes for a string too — the crash only lands on
+// the .join() that follows. All four inputs below are verbatim from published
+// skills that the MalSkillBench authors had to hand-override because the
+// auditor threw on them.
+// ---------------------------------------------------------------------------
+
+describe('parseManifestFromString — metadata.requires coercion', () => {
+  const withMetadata = (...lines: string[]) =>
+    ['---', 'name: s', 'description: d', ...lines, '---', 'Body.'].join('\n');
+
+  it('coerces a single-value requires.env string into an array', () => {
+    // verbatim: benign/baidu-ai-map
+    const m = parseManifestFromString(
+      withMetadata(
+        'metadata:',
+        '  requires:',
+        '    bins: ["curl"]',
+        '    env: BAIDU_MAP_AUTH_TOKEN'
+      )
+    );
+    expect(m.metadata?.openclaw?.requires?.env).toEqual(['BAIDU_MAP_AUTH_TOKEN']);
+    expect(m.metadata?.openclaw?.requires?.bins).toEqual(['curl']);
+  });
+
+  it('splits a comma-separated requires.env string', () => {
+    // verbatim: benign/signalhire-skill
+    const m = parseManifestFromString(
+      withMetadata(
+        'metadata:',
+        '  requires:',
+        '    env: SIGNALHIRE_API_KEY,SIGNALHIRE_CALLBACK_URL'
+      )
+    );
+    expect(m.metadata?.openclaw?.requires?.env).toEqual([
+      'SIGNALHIRE_API_KEY',
+      'SIGNALHIRE_CALLBACK_URL',
+    ]);
+  });
+
+  it('coerces requires.env inside a JSON-string metadata block', () => {
+    // verbatim shape: benign/plurum
+    const m = parseManifestFromString(
+      withMetadata(
+        'metadata: {"openclaw":{"requires":{"env":"PLURUM_API_KEY"}},"primaryEnv":"PLURUM_API_KEY"}'
+      )
+    );
+    expect(m.metadata?.openclaw?.requires?.env).toEqual(['PLURUM_API_KEY']);
+  });
+
+  it('survives the exact join the dependency check performs', () => {
+    const m = parseManifestFromString(
+      withMetadata('metadata:', '  requires:', '    env: A_TOKEN', '    bins: curl, jq')
+    );
+    const req = m.metadata?.openclaw?.requires;
+    expect(() => (req?.env ?? []).join(', ')).not.toThrow();
+    expect(() => (req?.bins ?? []).join(', ')).not.toThrow();
+    expect(req?.bins).toEqual(['curl', 'jq']);
+  });
+});
+
+describe('parseManifestFromString — metadata coercion is reported too', () => {
+  it('records a coerced metadata.requires.env in parseDegraded', () => {
+    // verbatim: benign/baidu-ai-map — the manifest only scans because we repaired it,
+    // and a report that says "clean" without saying "repaired" overstates the evidence.
+    const m = parseManifestFromString(
+      [
+        '---',
+        'name: s',
+        'description: d',
+        'metadata:',
+        '  requires:',
+        '    env: BAIDU_MAP_AUTH_TOKEN',
+        '---',
+        'Body.',
+      ].join('\n')
+    );
+    expect(m.parseDegraded).toEqual(expect.arrayContaining(['metadata.requires.env']));
+  });
+
+  it('leaves well-formed metadata undegraded', () => {
+    const m = parseManifestFromString(
+      [
+        '---',
+        'name: s',
+        'description: d',
+        'metadata:',
+        '  requires:',
+        '    env:',
+        '      - A',
+        '      - B',
+        '---',
+        'Body.',
+      ].join('\n')
+    );
+    expect(m.parseDegraded).toBeUndefined();
+  });
+});

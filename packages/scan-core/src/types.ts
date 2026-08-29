@@ -108,6 +108,16 @@ export interface SkillManifest {
   readonly 'allowed-tools'?: readonly string[];
   /** Raw instruction body (after frontmatter) */
   readonly instructions: string;
+  /**
+   * Frontmatter keys whose YAML value did not match the declared type and had to
+   * be coerced. Absent when the manifest parsed cleanly.
+   *
+   * Present so a degraded parse is visible in the report rather than silently
+   * normalised: a manifest that only scans because we repaired it is a weaker
+   * piece of evidence than one that was well-formed, and the consumer should be
+   * able to tell the difference.
+   */
+  readonly parseDegraded?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------
